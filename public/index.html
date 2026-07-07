@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ameresco Outreach</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%231a7a3d'/%3E%3Ctext x='50' y='72' font-size='62' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-mark">A</span>
+      <div>
+        <h1>Ameresco Outreach</h1>
+        <p class="tagline">Tailored first-touch emails, ready for Outlook</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="keyStatus" class="pill pill-warn" hidden>API key missing</span>
+      <button id="settingsBtn" class="btn btn-ghost">Settings</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Step 1: Upload -->
+    <section class="card" id="uploadCard">
+      <h2><span class="step">1</span> Upload your contact CSV</h2>
+      <p class="muted">One row per contact. The file is processed entirely in your browser — it is never uploaded or stored anywhere.</p>
+      <div class="upload-row">
+        <input type="file" id="csvFile" accept=".csv,text/csv" />
+        <span id="uploadSummary" class="muted"></span>
+      </div>
+      <div id="mappingPanel" hidden>
+        <h3>Check the column mapping</h3>
+        <p class="muted">We guessed which columns are which — correct anything that looks wrong.</p>
+        <div class="mapping-grid" id="mappingGrid"></div>
+        <button id="applyMapping" class="btn btn-primary">Use this mapping</button>
+      </div>
+    </section>
+
+    <!-- Step 2 + 3: pick company & contact -->
+    <section class="card" id="pickCard" hidden>
+      <h2><span class="step">2</span> Pick a company and a person</h2>
+      <div class="pick-columns">
+        <div class="pick-col">
+          <input type="search" id="companySearch" placeholder="Search companies…" />
+          <ul id="companyList" class="select-list"></ul>
+        </div>
+        <div class="pick-col">
+          <div id="contactHint" class="muted center-note">Select a company to see its contacts</div>
+          <ul id="contactList" class="select-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 4: workspace -->
+    <section class="card" id="workCard" hidden>
+      <h2><span class="step">3</span> Research &amp; draft</h2>
+      <div id="targetBanner" class="target-banner"></div>
+
+      <div class="work-grid">
+        <div class="work-col">
+          <div class="field-head">
+            <label for="researchBox">Company research</label>
+            <button id="researchBtn" class="btn btn-secondary">Research company</button>
+          </div>
+          <textarea id="researchBox" rows="10" placeholder="Click 'Research company' to generate a briefing from the company's website — or paste/type your own notes here."></textarea>
+          <div id="researchNote" class="muted small"></div>
+
+          <label for="extraContext">Extra context <span class="muted small">(optional — e.g. met at a trade show, referral, campaign angle)</span></label>
+          <textarea id="extraContext" rows="2"></textarea>
+
+          <div class="options-row">
+            <label>Tone
+              <select id="toneSelect">
+                <option value="professional and warm">Professional &amp; warm</option>
+                <option value="formal and concise">Formal &amp; concise</option>
+                <option value="friendly and conversational">Friendly &amp; conversational</option>
+                <option value="direct and to the point">Direct</option>
+              </select>
+            </label>
+            <label>Length
+              <select id="lengthSelect">
+                <option value="short (90-130 words)">Short (~100 words)</option>
+                <option value="medium (140-190 words)">Medium (~160 words)</option>
+                <option value="very short (60-80 words)">Very short (~70 words)</option>
+              </select>
+            </label>
+            <label>Call to action
+              <select id="ctaSelect">
+                <option value="a brief 15-20 minute intro call">Intro call</option>
+                <option value="a reply indicating whether this is relevant to them">Simple reply</option>
+                <option value="a short site visit or walkthrough">Site visit</option>
+                <option value="permission to send over a one-page summary">Send one-pager</option>
+              </select>
+            </label>
+          </div>
+
+          <button id="generateBtn" class="btn btn-primary btn-large">Generate email</button>
+        </div>
+
+        <div class="work-col">
+          <label for="subjectBox">Subject</label>
+          <input type="text" id="subjectBox" placeholder="Generated subject will appear here" />
+
+          <label for="bodyBox">Email body <span class="muted small">— edit freely before sending</span></label>
+          <textarea id="bodyBox" rows="16" placeholder="Generated email will appear here"></textarea>
+
+          <div id="rationaleBox" class="rationale" hidden></div>
+          <div id="lengthWarning" class="warn-note" hidden></div>
+
+          <div class="send-row">
+            <button id="outlookBtn" class="btn btn-primary btn-large">Open in Outlook</button>
+            <button id="copyBtn" class="btn btn-secondary">Copy email</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Settings modal -->
+  <dialog id="settingsModal">
+    <form method="dialog" class="settings-form">
+      <h2>Settings</h2>
+
+      <h3>Ameresco value proposition</h3>
+      <p class="muted small">This is the source of truth the AI draws on. Paste in your official messaging — the better this is, the better the emails.</p>
+      <textarea id="valuePropBox" rows="12"></textarea>
+
+      <h3>Your details (used in the sign-off)</h3>
+      <div class="sender-grid">
+        <label>Name <input type="text" id="senderName" placeholder="e.g. Martyn Sheridan" /></label>
+        <label>Job title <input type="text" id="senderTitle" placeholder="e.g. Business Development Manager" /></label>
+        <label>Phone <input type="text" id="senderPhone" placeholder="optional" /></label>
+      </div>
+
+      <div class="modal-buttons">
+        <button value="cancel" class="btn btn-ghost">Cancel</button>
+        <button id="saveSettings" value="save" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/vendor/papaparse.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
