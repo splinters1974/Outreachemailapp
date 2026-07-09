@@ -1,8 +1,12 @@
 /* Ameresco Outreach — front-end logic.
    All CSV parsing happens in the browser; contact data never leaves this page
-   except the single selected company/contact sent for email generation. */
+   except the single selected company/contact sent for email generation.
+   Settings (value proposition, sender details, passcode) live in this
+   browser's localStorage — nothing is stored on the server. */
 
 const $ = (id) => document.getElementById(id);
+
+const ERROR_MARKER = "\u0000ERROR:";
 
 const state = {
   headers: [],
@@ -12,6 +16,8 @@ const state = {
   selectedCompany: null,
   selectedContact: null,
   researchCache: {}, // company name -> research text
+  passcodeRequired: false,
+  defaultValueProp: "",
 };
 
 const FIELDS = [
@@ -31,6 +37,36 @@ const FREE_EMAIL_DOMAINS = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
+// Local settings
+// ---------------------------------------------------------------------------
+
+function getSender() {
+  try {
+    return JSON.parse(localStorage.getItem("senderSettings") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+async function getValueProp() {
+  const saved = localStorage.getItem("valueProp");
+  if (saved !== null && saved.trim()) return saved;
+  if (!state.defaultValueProp) {
+    try {
+      const res = await fetch("/value-prop-default.md");
+      if (res.ok) state.defaultValueProp = await res.text();
+    } catch {
+      /* offline */
+    }
+  }
+  return state.defaultValueProp;
+}
+
+function getPasscode() {
+  return localStorage.getItem("passcode") || "";
+}
+
+// ---------------------------------------------------------------------------
 // Toast + fetch helpers
 // ---------------------------------------------------------------------------
 
@@ -44,15 +80,69 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => (el.hidden = true), isError ? 8000 : 3000);
 }
 
+function apiHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  const passcode = getPasscode();
+  if (passcode) headers["x-passcode"] = passcode;
+  return headers;
+}
+
 async function api(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: apiHeaders(),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+
+/**
+ * POST to a streaming endpoint. Calls onText(accumulated) as chunks arrive
+ * and resolves with { text, response }. Prompts for the site passcode on 401
+ * and retries once.
+ */
+async function streamRequest(url, body, onText, isRetry = false) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: apiHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401 && !isRetry) {
+    const entered = window.prompt(
+      "This site is protected. Enter the access passcode:"
+    );
+    if (!entered) throw new Error("Passcode required.");
+    localStorage.setItem("passcode", entered.trim());
+    return streamRequest(url, body, onText, true);
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    const errIdx = text.indexOf(ERROR_MARKER);
+    if (errIdx !== -1) {
+      // Drain the rest so the full error message arrives, then fail.
+      for (;;) {
+        const rest = await reader.read();
+        if (rest.done) break;
+        text += decoder.decode(rest.value, { stream: true });
+      }
+      throw new Error(text.slice(errIdx + ERROR_MARKER.length).trim());
+    }
+    if (onText) onText(text.trimStart());
+  }
+  return { text: text.trimStart(), response: res };
 }
 
 function setBusy(button, busy, busyText) {
@@ -75,8 +165,7 @@ async function init() {
   try {
     const status = await api("GET", "/api/status");
     $("keyStatus").hidden = status.hasApiKey;
-    const settings = await api("GET", "/api/settings");
-    localStorage.setItem("senderSettings", JSON.stringify(settings));
+    state.passcodeRequired = status.passcodeRequired;
   } catch {
     /* status is cosmetic */
   }
@@ -200,10 +289,7 @@ function buildCompanies() {
 
   state.companies = [...byKey.values()]
     .map((c) => {
-      const domain =
-        mostCommon(c.websites) ||
-        mostCommon(c.emailDomains) ||
-        "";
+      const domain = mostCommon(c.websites) || mostCommon(c.emailDomains) || "";
       return { name: c.name, domain: cleanDomain(domain), contacts: c.contacts };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -314,14 +400,19 @@ $("researchBtn").addEventListener("click", async () => {
   const company = state.selectedCompany;
   if (!company) return;
   setBusy($("researchBtn"), true, "Researching…");
+  $("researchBox").value = "";
   try {
-    const data = await api("POST", "/api/research", {
-      companyName: company.name,
-      domain: company.domain,
-    });
-    $("researchBox").value = data.summary;
-    $("researchNote").textContent = data.fetchNote || "";
-    state.researchCache[company.name] = data.summary;
+    const { text, response } = await streamRequest(
+      "/api/research",
+      { companyName: company.name, domain: company.domain },
+      (partial) => {
+        $("researchBox").value = partial;
+      }
+    );
+    $("researchBox").value = text;
+    state.researchCache[company.name] = text;
+    const note = response.headers.get("X-Fetch-Note");
+    $("researchNote").textContent = note ? decodeURIComponent(note) : "";
   } catch (err) {
     toast(err.message, true);
   } finally {
@@ -341,8 +432,8 @@ $("generateBtn").addEventListener("click", async () => {
   if (!company || !contact) return;
   setBusy($("generateBtn"), true, "Writing…");
   try {
-    const settings = JSON.parse(localStorage.getItem("senderSettings") || "{}");
-    const data = await api("POST", "/api/generate", {
+    const valueProp = await getValueProp();
+    const { text } = await streamRequest("/api/generate", {
       company: {
         name: company.name,
         research: $("researchBox").value.trim(),
@@ -354,12 +445,22 @@ $("generateBtn").addEventListener("click", async () => {
         length: $("lengthSelect").value,
         callToAction: $("ctaSelect").value,
       },
-      sender: settings,
+      sender: getSender(),
+      valueProp,
     });
-    $("subjectBox").value = data.subject;
-    $("bodyBox").value = data.body;
+
+    let email;
+    try {
+      email = JSON.parse(text);
+    } catch {
+      throw new Error(
+        "The model returned an unexpected response — please try again."
+      );
+    }
+    $("subjectBox").value = email.subject;
+    $("bodyBox").value = email.body;
     const rationale = $("rationaleBox");
-    rationale.textContent = `Why this angle: ${data.rationale}`;
+    rationale.textContent = `Why this angle: ${email.rationale}`;
     rationale.hidden = false;
     updateLengthWarning();
   } catch (err) {
@@ -420,39 +521,31 @@ $("copyBtn").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Settings
+// Settings (stored in this browser only)
 // ---------------------------------------------------------------------------
 
 $("settingsBtn").addEventListener("click", async () => {
-  try {
-    const [vp, settings] = await Promise.all([
-      api("GET", "/api/value-prop"),
-      api("GET", "/api/settings"),
-    ]);
-    $("valuePropBox").value = vp.text || "";
-    $("senderName").value = settings.name || "";
-    $("senderTitle").value = settings.title || "";
-    $("senderPhone").value = settings.phone || "";
-  } catch (err) {
-    toast(err.message, true);
-  }
+  $("valuePropBox").value = await getValueProp();
+  const sender = getSender();
+  $("senderName").value = sender.name || "";
+  $("senderTitle").value = sender.title || "";
+  $("senderPhone").value = sender.phone || "";
+  $("passcodeInput").value = getPasscode();
+  $("passcodeField").hidden = !state.passcodeRequired;
   $("settingsModal").showModal();
 });
 
-$("saveSettings").addEventListener("click", async () => {
-  const sender = {
-    name: $("senderName").value.trim(),
-    title: $("senderTitle").value.trim(),
-    phone: $("senderPhone").value.trim(),
-  };
-  try {
-    await Promise.all([
-      api("PUT", "/api/value-prop", { text: $("valuePropBox").value }),
-      api("PUT", "/api/settings", sender),
-    ]);
-    localStorage.setItem("senderSettings", JSON.stringify(sender));
-    toast("Settings saved.");
-  } catch (err) {
-    toast(err.message, true);
-  }
+$("saveSettings").addEventListener("click", () => {
+  localStorage.setItem("valueProp", $("valuePropBox").value);
+  localStorage.setItem(
+    "senderSettings",
+    JSON.stringify({
+      name: $("senderName").value.trim(),
+      title: $("senderTitle").value.trim(),
+      phone: $("senderPhone").value.trim(),
+    })
+  );
+  const passcode = $("passcodeInput").value.trim();
+  if (passcode) localStorage.setItem("passcode", passcode);
+  toast("Settings saved (stored in this browser).");
 });

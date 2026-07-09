@@ -1,11 +1,11 @@
 {
   "name": "ameresco-outreach",
   "version": "1.0.0",
-  "description": "Tailored outreach email generator: upload a contact CSV, research the company, and draft a persona-aware email ready to open in Outlook.",
+  "description": "Tailored outreach email generator: upload a contact CSV, research the company, and draft a persona-aware email ready to open in Outlook. Deployable to Netlify or runnable locally.",
   "type": "module",
-  "main": "server.js",
+  "main": "dev-server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node dev-server.js"
   },
   "engines": {
     "node": ">=18.17"
