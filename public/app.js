@@ -549,3 +549,55 @@ $("saveSettings").addEventListener("click", () => {
   if (passcode) localStorage.setItem("passcode", passcode);
   toast("Settings saved (stored in this browser).");
 });
+
+// ---------------------------------------------------------------------------
+// Load the value proposition from a PDF (text extracted in the browser)
+// ---------------------------------------------------------------------------
+
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.js";
+}
+
+$("valuePropPdf").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const status = $("pdfStatus");
+
+  if (!window.pdfjsLib) {
+    status.textContent = "PDF reader failed to load — please paste the text instead.";
+    return;
+  }
+
+  status.textContent = `Reading ${file.name}…`;
+  try {
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+    const parts = [];
+    for (let page = 1; page <= pdf.numPages; page++) {
+      const content = await (await pdf.getPage(page)).getTextContent();
+      // Rebuild line breaks: pdf.js flags the end of a line with hasEOL.
+      let line = "";
+      for (const item of content.items) {
+        line += item.str;
+        if (item.hasEOL) {
+          parts.push(line);
+          line = "";
+        }
+      }
+      if (line) parts.push(line);
+      parts.push(""); // blank line between pages
+    }
+    const text = parts.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    if (!text) {
+      status.textContent =
+        "No selectable text found — this looks like a scanned/image PDF. Please paste the text in manually.";
+      return;
+    }
+    $("valuePropBox").value = text;
+    status.textContent = `Loaded ${pdf.numPages} page${pdf.numPages > 1 ? "s" : ""} — review below, then Save.`;
+  } catch (err) {
+    status.textContent = `Couldn't read that PDF (${err.message}). Please paste the text instead.`;
+  } finally {
+    event.target.value = ""; // allow re-selecting the same file
+  }
+});

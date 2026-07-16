@@ -125,7 +125,14 @@
       <h2>Settings</h2>
 
       <h3>Ameresco value proposition</h3>
-      <p class="muted small">This is the source of truth the AI draws on. Paste in your official messaging — the better this is, the better the emails.</p>
+      <p class="muted small">This is the source of truth the AI draws on. Paste your official messaging below, or load it from a PDF — the better this is, the better the emails.</p>
+      <div class="vp-load-row">
+        <label class="btn btn-secondary file-btn">
+          Load from PDF
+          <input type="file" id="valuePropPdf" accept="application/pdf,.pdf" hidden />
+        </label>
+        <span id="pdfStatus" class="muted small"></span>
+      </div>
       <textarea id="valuePropBox" rows="12"></textarea>
 
       <h3>Your details (used in the sign-off)</h3>
@@ -153,6 +160,7 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="/vendor/papaparse.min.js"></script>
+  <script src="/vendor/pdf.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
