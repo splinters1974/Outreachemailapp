@@ -98,15 +98,33 @@
             </label>
           </div>
 
-          <button id="generateBtn" class="btn btn-primary btn-large">Generate email</button>
+          <div class="generate-row">
+            <button id="generateBtn" class="btn btn-primary btn-large">Generate email</button>
+            <button id="variationsBtn" class="btn btn-secondary">3 versions</button>
+            <button id="followupBtn" class="btn btn-secondary" hidden>Generate follow-up</button>
+          </div>
+          <div id="followupNote" class="muted small"></div>
         </div>
 
         <div class="work-col">
+          <div id="variationsPanel" hidden>
+            <label>Pick a version <span class="muted small">— click one to load it for editing</span></label>
+            <div id="variationsList"></div>
+          </div>
+
           <label for="subjectBox">Subject</label>
           <input type="text" id="subjectBox" placeholder="Generated subject will appear here" />
 
           <label for="bodyBox">Email body <span class="muted small">— edit freely before sending</span></label>
-          <textarea id="bodyBox" rows="16" placeholder="Generated email will appear here"></textarea>
+          <textarea id="bodyBox" rows="14" placeholder="Generated email will appear here"></textarea>
+
+          <div class="tweak-row" id="tweakRow" hidden>
+            <span class="muted small">Quick tweak:</span>
+            <button class="btn btn-ghost btn-tweak" data-instruction="Make it noticeably shorter and tighter without losing the core point.">Shorter</button>
+            <button class="btn btn-ghost btn-tweak" data-instruction="Make the tone a little warmer and more human, still professional.">Warmer</button>
+            <button class="btn btn-ghost btn-tweak" data-instruction="Make it more direct and to the point; trim any softening.">More direct</button>
+            <button class="btn btn-ghost btn-tweak" data-instruction="Rewrite only the subject line to a stronger, more specific 3-6 word option; keep the body unchanged.">New subject</button>
+          </div>
 
           <div id="rationaleBox" class="rationale" hidden></div>
           <div id="lengthWarning" class="warn-note" hidden></div>

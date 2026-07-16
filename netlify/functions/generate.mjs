@@ -9,7 +9,6 @@ import {
 
 // Maps a recipient's job function to (a) the drivers that person is measured on
 // and (b) the Ameresco value-proposition pillars that speak to those drivers.
-// The email is told to connect one clear driver to one relevant pillar.
 function personaGuidance(jobTitle) {
   const t = (jobTitle || "").toLowerCase();
   const buckets = [
@@ -57,13 +56,13 @@ function personaGuidance(jobTitle) {
   return "ROLE UNCLEAR — infer this person's likely commercial drivers from their job title and the company context, then connect one driver to the single most relevant Ameresco value-proposition pillar. Keep the angle business-outcome led, not technical.";
 }
 
-const EMAIL_SCHEMA = {
+const EMAIL_ITEM = {
   type: "object",
   properties: {
     subject: {
       type: "string",
       description:
-        "Subject line: 3-6 words, roughly 30-45 characters so it shows in full on mobile. Specific and relevant to this person/company. No clickbait, no 'quick question', no ALL CAPS, no emoji.",
+        "Subject line: 3-6 words, ~30-45 characters so it shows in full on mobile. Specific and relevant. No clickbait, no ALL CAPS, no emoji.",
     },
     body: {
       type: "string",
@@ -73,25 +72,37 @@ const EMAIL_SCHEMA = {
     rationale: {
       type: "string",
       description:
-        "One or two sentences: which driver you led with for this role and which Ameresco pillar you tied it to, and why it fits this company.",
+        "One or two sentences: which driver you led with and which Ameresco pillar you tied it to, and why it fits this person/company.",
     },
   },
   required: ["subject", "body", "rationale"],
   additionalProperties: false,
 };
 
-// Cold-outreach best practice, distilled from current B2B guidance (see PR notes)
-// and pinned into the system prompt so every email follows the same discipline.
+const SINGLE_SCHEMA = EMAIL_ITEM;
+const VARIATIONS_SCHEMA = {
+  type: "object",
+  properties: {
+    variants: {
+      type: "array",
+      description: "Exactly three distinct email options.",
+      items: EMAIL_ITEM,
+    },
+  },
+  required: ["variants"],
+  additionalProperties: false,
+};
+
 const BEST_PRACTICE = `You write first-touch cold outreach emails for Ameresco — an energy efficiency, renewable energy and energy infrastructure company — to senior people in large organisations.
 
 HOW A GOOD SENIOR-LEVEL COLD EMAIL IS BUILT (follow this):
 - Length: 60-120 words in the body. Shorter is better; a busy senior reader skims on a phone. Never exceed 120 words.
 - Structure, three short movements, one to two sentences each:
-    1) WHY I'M WRITING — open with something specific and true about THEM: their company, their sector's pressures, or their role. Never open with Ameresco or "I hope this finds you well".
+    1) WHY I'M WRITING — open with something specific and true about THEM: their company, their sector's pressures, a recent development, or their role. Never open with Ameresco or "I hope this finds you well".
     2) WHAT I PROPOSE — the value in a single sentence tied to their driver. Not a feature list.
-    3) PROOF — one credible proof point: a comparable customer type, a number, or a relevant outcome. Only use proof supported by the value proposition provided; if none fits, use a modest, non-specific credibility line rather than inventing a statistic.
+    3) PROOF — one credible proof point supported by the value proposition. If none fits, use a modest credibility line rather than inventing a statistic.
 - One single call to action. The default is a brief 15-20 minute call, framed as low-commitment. Never stack two asks.
-- Tailor on BOTH axes: the company (from the research) AND the person's role/drivers (from the role guidance). The connection between their driver and the Ameresco pillar is the point of the email.
+- Tailor on BOTH axes: the company (from the research) AND the person's role/drivers. The connection between their driver and the Ameresco pillar is the point of the email.
 
 RULES:
 - Sound like a considered, senior human. Plain, direct, warm-but-professional.
@@ -100,13 +111,28 @@ RULES:
 - Never invent facts about their company or fabricate numbers. If the research is thin, stay general rather than guessing.
 - Plain text only. Include a greeting (use their first name if available) and a sign-off with the sender's name.`;
 
+function priorEmailsBlock(history) {
+  if (!Array.isArray(history) || history.length === 0) return "";
+  return (
+    "PREVIOUS EMAILS ALREADY SENT TO THIS PERSON (most recent last):\n" +
+    history
+      .map((h, i) => {
+        const when = h.at ? ` (sent ${new Date(h.at).toLocaleDateString("en-GB")})` : "";
+        return `#${i + 1}${when}\nSubject: ${h.subject || ""}\n${h.body || ""}`;
+      })
+      .join("\n\n") +
+    "\n\n"
+  );
+}
+
 export default async (req) => {
   const denied = requireAuth(req);
   if (denied) return denied;
 
-  const { company, contact, options, sender, valueProp } = await req
-    .json()
-    .catch(() => ({}));
+  const body = await req.json().catch(() => ({}));
+  const { company, contact, options, sender, valueProp } = body;
+  const task = body.task || "first"; // first | followup | variations | refine
+
   if (!company?.name || !contact?.email) {
     return json(400, { error: "company.name and contact.email are required." });
   }
@@ -130,41 +156,72 @@ export default async (req) => {
 
   const firstName = (contact.name || "").trim().split(/\s+/)[0] || "";
 
+  const targetBlock =
+    `RECIPIENT: ${contact.name || "Unknown name"}` +
+    (firstName ? ` (first name: ${firstName})` : "") +
+    ` — ${contact.title || "role unknown"} at ${company.name}.\n\n` +
+    `ROLE DRIVERS & MATCHING AMERESCO PILLARS:\n${personaGuidance(contact.title)}\n\n` +
+    `COMPANY RESEARCH:\n${company.research || "None available — keep company-specific claims out and lead on the sector/role instead."}\n\n` +
+    (company.extraContext
+      ? `EXTRA CONTEXT FROM THE SENDER (use if relevant):\n${company.extraContext}\n\n`
+      : "");
+
+  let userContent;
+  let schema = SINGLE_SCHEMA;
+
+  if (task === "refine") {
+    const draft = body.draft || {};
+    const instruction = body.instruction || "Improve this email.";
+    schema = SINGLE_SCHEMA;
+    userContent =
+      `Revise the email below. Keep everything that works; apply this change: ${instruction}\n\n` +
+      `CURRENT SUBJECT: ${draft.subject || ""}\nCURRENT BODY:\n${draft.body || ""}\n\n` +
+      `Context for reference:\n${targetBlock}${senderBlock}\n` +
+      `Keep it a single cold outreach email that still follows all the rules. Return the full revised subject and body.`;
+  } else if (task === "followup") {
+    schema = SINGLE_SCHEMA;
+    userContent =
+      `Write a FOLLOW-UP cold outreach email — the previous message(s) got no reply. ` +
+      `Do not repeat the earlier angle; take a fresh, useful angle for this person's role. ` +
+      `Keep it shorter than a first touch (aim ~60-90 words), reference lightly that you wrote before without guilt-tripping, add one new specific point or proof, and keep a single low-pressure ask.\n\n` +
+      priorEmailsBlock(body.history) +
+      targetBlock +
+      `${senderBlock}\n` +
+      `Tone: ${tone}. Call to action: ${cta}.`;
+  } else if (task === "variations") {
+    schema = VARIATIONS_SCHEMA;
+    userContent =
+      `Write THREE distinctly different cold outreach emails for the same recipient — different opening hooks and different angles (e.g. one financial, one operational, one sustainability/strategic where the role allows), so the sender can pick the best. Each must independently follow all the rules.\n\n` +
+      targetBlock +
+      `${senderBlock}\n` +
+      `Tone: ${tone}. Length: ${length}. Call to action: ${cta}.\n` +
+      `Return exactly three options in "variants".`;
+  } else {
+    // first touch
+    schema = SINGLE_SCHEMA;
+    userContent =
+      `Write one cold outreach email.\n\n` +
+      targetBlock +
+      `${senderBlock}\n` +
+      `Tone: ${tone}. Length: ${length}. Call to action: ${cta}.`;
+  }
+
   const stream = client.messages.stream({
     model: MODEL_GENERATE,
-    max_tokens: 1200,
+    max_tokens: task === "variations" ? 2500 : 1200,
     thinking: { type: "disabled" },
-    output_config: { format: { type: "json_schema", schema: EMAIL_SCHEMA } },
-    // System is split so the stable prefix (best practice + value proposition)
-    // can be cached and reused across every email in a batch — cheaper when
-    // generating many emails in one sitting.
+    output_config: { format: { type: "json_schema", schema } },
     system: [
       { type: "text", text: BEST_PRACTICE },
       {
         type: "text",
         text:
-          "AMERESCO VALUE PROPOSITION (this is the only source of truth for claims about Ameresco — draw only on what is stated here):\n" +
+          "AMERESCO VALUE PROPOSITION (the only source of truth for claims about Ameresco — draw only on what is stated here):\n" +
           valueProp,
         cache_control: { type: "ephemeral" },
       },
     ],
-    messages: [
-      {
-        role: "user",
-        content:
-          `Write one cold outreach email.\n\n` +
-          `RECIPIENT: ${contact.name || "Unknown name"}` +
-          (firstName ? ` (first name: ${firstName})` : "") +
-          ` — ${contact.title || "role unknown"} at ${company.name}.\n\n` +
-          `ROLE DRIVERS & MATCHING AMERESCO PILLARS:\n${personaGuidance(contact.title)}\n\n` +
-          `COMPANY RESEARCH:\n${company.research || "None available — keep company-specific claims out and lead on the sector/role instead."}\n\n` +
-          (company.extraContext
-            ? `EXTRA CONTEXT FROM THE SENDER (e.g. how we know them, a referral, a campaign angle — use if relevant):\n${company.extraContext}\n\n`
-            : "") +
-          `${senderBlock}\n` +
-          `Tone: ${tone}. Length: ${length}. Call to action: ${cta}.`,
-      },
-    ],
+    messages: [{ role: "user", content: userContent }],
   });
 
   return streamTextResponse(stream);
