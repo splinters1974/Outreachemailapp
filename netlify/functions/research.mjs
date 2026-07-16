@@ -88,25 +88,34 @@ export default async (req) => {
     }
   }
 
+  // Allow disabling live web search (and its per-search cost) via env var.
+  const webSearch = process.env.DISABLE_WEB_SEARCH ? [] : [
+    { type: "web_search_20250305", name: "web_search", max_uses: 3 },
+  ];
+
   const stream = client.messages.stream({
     model: MODEL_RESEARCH,
-    max_tokens: 1024,
+    max_tokens: 1500,
+    tools: webSearch,
     system:
       "You are a B2B sales researcher preparing a briefing for an Ameresco business development professional. " +
       "Ameresco is an energy efficiency, renewable energy, and energy infrastructure company. " +
-      "Write concise, factual briefings. If you are unsure about something, say so rather than inventing details.",
+      "You have a web search tool: use it to find CURRENT, specific facts — recent news, expansions, results, net zero / sustainability commitments, leadership changes, or regulatory pressure — that a salesperson could open an email with. " +
+      "Prefer recent, verifiable facts over generic description. Write concise, factual briefings and never invent details; if something is unverified, say so.",
     messages: [
       {
         role: "user",
         content:
-          `Prepare a short briefing on the company "${companyName}"` +
+          `Prepare a short sales briefing on the company "${companyName}"` +
           (domain ? ` (website: ${domain})` : "") +
           `.\n\nWebsite content retrieved just now:\n${websiteSection}\n\n` +
-          "Combine the website content with what you reliably know about this company. Cover, in short labelled sections:\n" +
+          "First, run one or two web searches for recent, specific developments about this company (news, sustainability or net zero commitments, expansions, financial results, regulatory pressure). " +
+          "Then combine the website content, your search findings, and what you reliably know, into a briefing with these short labelled sections:\n" +
           "1. What they do — sector, offering, scale (sites/locations if evident).\n" +
-          "2. Energy & sustainability angle — anything suggesting energy-intensive operations, ageing estate, net zero / ESG commitments, or regulatory pressure.\n" +
-          "3. Likely priorities — what leadership at this company is probably focused on right now.\n" +
-          "Keep the whole briefing under 250 words. Plain text, no markdown symbols.",
+          "2. Energy & sustainability angle — energy-intensive operations, ageing estate, net zero / ESG commitments, or regulatory pressure.\n" +
+          "3. Recent developments — anything current and specific worth referencing in an opening line (with rough dates where known).\n" +
+          "4. Likely priorities — what leadership is probably focused on right now.\n" +
+          "Keep the whole briefing under 250 words. Plain text, no markdown symbols, no citation brackets.",
       },
     ],
   });

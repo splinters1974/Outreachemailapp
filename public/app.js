@@ -506,8 +506,51 @@ function selectContact(contact) {
   $("bodyBox").value = "";
   $("rationaleBox").hidden = true;
   $("lengthWarning").hidden = true;
+  $("variationsPanel").hidden = true;
+  $("tweakRow").hidden = true;
+  refreshFollowupAvailability();
   $("workCard").hidden = false;
   $("workCard").scrollIntoView({ behavior: "smooth" });
+}
+
+// ---------------------------------------------------------------------------
+// Per-recipient email history (used for follow-ups)
+// ---------------------------------------------------------------------------
+
+function getEmailHistory(email) {
+  try {
+    const all = JSON.parse(localStorage.getItem("emailHistory") || "{}");
+    return all[email.toLowerCase()] || [];
+  } catch {
+    return [];
+  }
+}
+
+function addEmailHistory(email, subject, body) {
+  let all = {};
+  try {
+    all = JSON.parse(localStorage.getItem("emailHistory") || "{}");
+  } catch {
+    /* reset on corruption */
+  }
+  const key = email.toLowerCase();
+  all[key] = (all[key] || []).concat({
+    subject,
+    body,
+    at: new Date().toISOString(),
+  });
+  localStorage.setItem("emailHistory", JSON.stringify(all));
+}
+
+function refreshFollowupAvailability() {
+  const contact = state.selectedContact;
+  const history = contact ? getEmailHistory(contact.email) : [];
+  const btn = $("followupBtn");
+  btn.hidden = history.length === 0;
+  $("followupNote").textContent =
+    history.length > 0
+      ? `${history.length} email${history.length > 1 ? "s" : ""} already sent to this person — a follow-up will take a fresh angle.`
+      : "";
 }
 
 // ---------------------------------------------------------------------------
@@ -544,48 +587,129 @@ $("researchBox").addEventListener("input", () => {
   }
 });
 
-$("generateBtn").addEventListener("click", async () => {
+// Build the shared request payload for any generation task.
+async function generatePayload(task, extra = {}) {
+  const company = state.selectedCompany;
+  const contact = state.selectedContact;
+  return {
+    task,
+    company: {
+      name: company.name,
+      research: $("researchBox").value.trim(),
+      extraContext: $("extraContext").value.trim(),
+    },
+    contact,
+    options: {
+      tone: $("toneSelect").value,
+      length: $("lengthSelect").value,
+      callToAction: $("ctaSelect").value,
+    },
+    sender: getSender(),
+    valueProp: await getValueProp(),
+    ...extra,
+  };
+}
+
+function showEmail(email) {
+  $("subjectBox").value = email.subject || "";
+  $("bodyBox").value = email.body || "";
+  const rationale = $("rationaleBox");
+  if (email.rationale) {
+    rationale.textContent = `Why this angle: ${email.rationale}`;
+    rationale.hidden = false;
+  } else {
+    rationale.hidden = true;
+  }
+  $("tweakRow").hidden = false;
+  updateLengthWarning();
+}
+
+async function runGenerate(button, busyText, task, extra) {
   const company = state.selectedCompany;
   const contact = state.selectedContact;
   if (!company || !contact) return;
-  setBusy($("generateBtn"), true, "Writing…");
+  setBusy(button, true, busyText);
   try {
-    const valueProp = await getValueProp();
-    const { text } = await streamRequest("/api/generate", {
-      company: {
-        name: company.name,
-        research: $("researchBox").value.trim(),
-        extraContext: $("extraContext").value.trim(),
-      },
-      contact,
-      options: {
-        tone: $("toneSelect").value,
-        length: $("lengthSelect").value,
-        callToAction: $("ctaSelect").value,
-      },
-      sender: getSender(),
-      valueProp,
-    });
-
-    let email;
+    const payload = await generatePayload(task, extra);
+    const { text } = await streamRequest("/api/generate", payload);
+    let parsed;
     try {
-      email = JSON.parse(text);
+      parsed = JSON.parse(text);
     } catch {
-      throw new Error(
-        "The model returned an unexpected response — please try again."
-      );
+      throw new Error("The model returned an unexpected response — please try again.");
     }
-    $("subjectBox").value = email.subject;
-    $("bodyBox").value = email.body;
-    const rationale = $("rationaleBox");
-    rationale.textContent = `Why this angle: ${email.rationale}`;
-    rationale.hidden = false;
-    updateLengthWarning();
+    if (task === "variations") {
+      renderVariations(parsed.variants || []);
+    } else {
+      $("variationsPanel").hidden = true;
+      showEmail(parsed);
+    }
   } catch (err) {
     toast(err.message, true);
   } finally {
-    setBusy($("generateBtn"), false);
+    setBusy(button, false);
   }
+}
+
+$("generateBtn").addEventListener("click", () =>
+  runGenerate($("generateBtn"), "Writing…", "first")
+);
+
+$("variationsBtn").addEventListener("click", () =>
+  runGenerate($("variationsBtn"), "Writing 3…", "variations")
+);
+
+$("followupBtn").addEventListener("click", () => {
+  const history = getEmailHistory(state.selectedContact.email);
+  runGenerate($("followupBtn"), "Writing…", "followup", { history });
+});
+
+function renderVariations(variants) {
+  const list = $("variationsList");
+  list.innerHTML = "";
+  if (variants.length === 0) {
+    $("variationsPanel").hidden = true;
+    return;
+  }
+  variants.forEach((v, i) => {
+    const card = document.createElement("div");
+    card.className = "variation";
+    const subj = document.createElement("div");
+    subj.className = "v-subject";
+    subj.textContent = `${i + 1}. ${v.subject || ""}`;
+    const body = document.createElement("div");
+    body.className = "v-body";
+    body.textContent = v.body || "";
+    card.appendChild(subj);
+    card.appendChild(body);
+    if (v.rationale) {
+      const why = document.createElement("div");
+      why.className = "v-why";
+      why.textContent = v.rationale;
+      card.appendChild(why);
+    }
+    card.addEventListener("click", () => {
+      showEmail(v);
+      $("bodyBox").scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    list.appendChild(card);
+  });
+  $("variationsPanel").hidden = false;
+}
+
+// Quick-tweak buttons: refine the current draft.
+document.querySelectorAll(".btn-tweak").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const draft = { subject: $("subjectBox").value, body: $("bodyBox").value };
+    if (!draft.body.trim()) {
+      toast("Generate or write an email first.", true);
+      return;
+    }
+    runGenerate(btn, "…", "refine", {
+      draft,
+      instruction: btn.dataset.instruction,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -625,10 +749,12 @@ $("outlookBtn").addEventListener("click", () => {
     `?subject=${encodeURIComponent(subject)}` +
     `&body=${encodeURIComponent(body)}`;
 
-  // Mark this person as emailed (records the moment you opened the draft) and
-  // refresh the list so the badge shows immediately.
+  // Mark this person as emailed (records the moment you opened the draft),
+  // store the email so follow-ups can reference it, and refresh the UI.
   recordSent(contact.email);
+  addEmailHistory(contact.email, subject, body);
   renderContactList();
+  refreshFollowupAvailability();
 
   window.location.href = href;
 });
