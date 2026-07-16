@@ -1,6 +1,20 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+// Model selection is split by task to control cost:
+//  - Research is straightforward summarisation → a fast, cheap model is plenty.
+//  - Email writing is the deliverable and benefits from a stronger writer, but
+//    Sonnet is far cheaper than Opus and easily good enough here.
+// Both can be overridden per environment; ANTHROPIC_MODEL overrides both.
+export const MODEL_RESEARCH =
+  process.env.ANTHROPIC_MODEL_RESEARCH ||
+  process.env.ANTHROPIC_MODEL ||
+  "claude-haiku-4-5";
+export const MODEL_GENERATE =
+  process.env.ANTHROPIC_MODEL_GENERATE ||
+  process.env.ANTHROPIC_MODEL ||
+  "claude-sonnet-5";
+// Back-compat export used by the status endpoint.
+export const MODEL = MODEL_GENERATE;
 
 export const NO_KEY_MESSAGE =
   "No Anthropic API key is configured. Site owner: add ANTHROPIC_API_KEY in Netlify → Site configuration → Environment variables (get a key at console.anthropic.com), then redeploy. Running locally: put it in a .env file.";

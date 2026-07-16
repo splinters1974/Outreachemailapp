@@ -22,7 +22,7 @@ const state = {
 
 const FIELDS = [
   { key: "email", label: "Email (required)", partial: ["email", "e-mail"], exact: ["mail"] },
-  { key: "fullName", label: "Full name", partial: ["full name", "fullname", "contact name"], exact: ["name"] },
+  { key: "fullName", label: "Full name (optional — else First + Last)", partial: ["full name", "fullname", "contact name"], exact: ["name"] },
   { key: "firstName", label: "First name", partial: ["first name", "firstname"], exact: ["first", "forename"] },
   { key: "lastName", label: "Last name", partial: ["last name", "lastname", "surname"], exact: ["last"] },
   { key: "jobTitle", label: "Job title / role", partial: ["job title", "jobtitle", "position"], exact: ["title", "role", "job"] },
@@ -64,6 +64,63 @@ async function getValueProp() {
 
 function getPasscode() {
   return localStorage.getItem("passcode") || "";
+}
+
+// Persisted uploaded contacts (so you don't re-upload/re-map each visit).
+function saveContactData() {
+  try {
+    localStorage.setItem(
+      "contactData",
+      JSON.stringify({
+        companies: state.companies,
+        fileName: state.fileName || "",
+        savedAt: new Date().toISOString(),
+        count: state.companies.reduce((n, c) => n + c.contacts.length, 0),
+      })
+    );
+  } catch {
+    /* localStorage full or unavailable — non-fatal */
+  }
+}
+
+function loadContactData() {
+  try {
+    const raw = localStorage.getItem("contactData");
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.companies) || data.companies.length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function clearContactData() {
+  localStorage.removeItem("contactData");
+}
+
+// Per-recipient "emailed" log: { emailLowercased: ISO timestamp }.
+function getSentLog() {
+  try {
+    return JSON.parse(localStorage.getItem("sentLog") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function recordSent(email) {
+  const log = getSentLog();
+  log[email.toLowerCase()] = new Date().toISOString();
+  localStorage.setItem("sentLog", JSON.stringify(log));
+}
+
+function sentDateFor(email) {
+  return getSentLog()[email.toLowerCase()] || null;
+}
+
+function formatSentDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
 // ---------------------------------------------------------------------------
@@ -169,8 +226,40 @@ async function init() {
   } catch {
     /* status is cosmetic */
   }
+  restoreSavedContacts();
 }
+
+function restoreSavedContacts() {
+  const data = loadContactData();
+  if (!data) return;
+  state.companies = data.companies;
+  state.fileName = data.fileName || "";
+  const when = data.savedAt ? new Date(data.savedAt).toLocaleDateString() : "";
+  $("uploadSummary").textContent =
+    `${data.count} saved contacts` +
+    (data.fileName ? ` from ${data.fileName}` : "") +
+    (when ? ` (loaded ${when})` : "");
+  $("clearDataBtn").hidden = false;
+  renderCompanyList();
+  $("pickCard").hidden = false;
+}
+
 init();
+
+$("clearDataBtn").addEventListener("click", () => {
+  if (!window.confirm("Remove the saved contacts from this browser?")) return;
+  clearContactData();
+  state.companies = [];
+  state.selectedCompany = null;
+  state.selectedContact = null;
+  $("companyList").innerHTML = "";
+  $("contactList").innerHTML = "";
+  $("uploadSummary").textContent = "";
+  $("clearDataBtn").hidden = true;
+  $("pickCard").hidden = true;
+  $("workCard").hidden = true;
+  toast("Saved contacts cleared.");
+});
 
 // ---------------------------------------------------------------------------
 // Step 1 — CSV upload & column mapping
@@ -179,6 +268,7 @@ init();
 $("csvFile").addEventListener("change", (event) => {
   const file = event.target.files[0];
   if (!file) return;
+  state.fileName = file.name;
   Papa.parse(file, {
     header: true,
     skipEmptyLines: "greedy",
@@ -243,6 +333,8 @@ $("applyMapping").addEventListener("click", () => {
   }
   state.mapping = mapping;
   buildCompanies();
+  saveContactData();
+  $("clearDataBtn").hidden = false;
   renderCompanyList();
   $("pickCard").hidden = false;
   $("pickCard").scrollIntoView({ behavior: "smooth" });
@@ -264,13 +356,16 @@ function buildCompanies() {
         : emailDomain.split(".")[0].replace(/^\w/, (c) => c.toUpperCase());
     }
 
+    // Prefer a mapped full-name column; otherwise stitch first + last together.
     let name = m.fullName ? String(row[m.fullName] || "").trim() : "";
     if (!name) {
       name = [m.firstName && row[m.firstName], m.lastName && row[m.lastName]]
         .filter(Boolean)
         .map((v) => String(v).trim())
+        .filter(Boolean)
         .join(" ");
     }
+    name = tidyName(name);
 
     const website = m.website ? String(row[m.website] || "").trim() : "";
     const key = companyName.toLowerCase();
@@ -300,6 +395,18 @@ function mostCommon(values) {
   const counts = new Map();
   for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function tidyName(name) {
+  const trimmed = name.replace(/\s+/g, " ").trim();
+  // Title-case names that arrive fully upper- or lower-case (e.g. "JOHN SMITH").
+  if (trimmed && (trimmed === trimmed.toUpperCase() || trimmed === trimmed.toLowerCase())) {
+    return trimmed
+      .toLowerCase()
+      .replace(/\b([a-z])/g, (c) => c.toUpperCase())
+      .replace(/\b(Mc)([a-z])/g, (_, p, l) => p + l.toUpperCase());
+  }
+  return trimmed;
 }
 
 function cleanDomain(value) {
@@ -359,6 +466,17 @@ function renderContactList() {
     wrap.appendChild(nameEl);
     wrap.appendChild(roleEl);
     li.appendChild(wrap);
+
+    const sentIso = sentDateFor(contact.email);
+    if (sentIso) {
+      li.classList.add("emailed");
+      const badge = document.createElement("span");
+      badge.className = "sent-badge";
+      badge.textContent = `✓ emailed ${formatSentDate(sentIso)}`;
+      badge.title = `Marked as emailed on ${new Date(sentIso).toLocaleString()}`;
+      li.appendChild(badge);
+    }
+
     if (state.selectedContact === contact) li.classList.add("selected");
     li.addEventListener("click", () => selectContact(contact));
     list.appendChild(li);
@@ -506,6 +624,12 @@ $("outlookBtn").addEventListener("click", () => {
     `mailto:${encodeURIComponent(contact.email)}` +
     `?subject=${encodeURIComponent(subject)}` +
     `&body=${encodeURIComponent(body)}`;
+
+  // Mark this person as emailed (records the moment you opened the draft) and
+  // refresh the list so the badge shows immediately.
+  recordSent(contact.email);
+  renderContactList();
+
   window.location.href = href;
 });
 

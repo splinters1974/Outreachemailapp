@@ -1,5 +1,5 @@
 import {
-  MODEL,
+  MODEL_RESEARCH,
   NO_KEY_MESSAGE,
   json,
   requireAuth,
@@ -89,9 +89,8 @@ export default async (req) => {
   }
 
   const stream = client.messages.stream({
-    model: MODEL,
-    max_tokens: 4096,
-    thinking: { type: "adaptive" },
+    model: MODEL_RESEARCH,
+    max_tokens: 1024,
     system:
       "You are a B2B sales researcher preparing a briefing for an Ameresco business development professional. " +
       "Ameresco is an energy efficiency, renewable energy, and energy infrastructure company. " +
