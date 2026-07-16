@@ -26,10 +26,11 @@
     <!-- Step 1: Upload -->
     <section class="card" id="uploadCard">
       <h2><span class="step">1</span> Upload your contact CSV</h2>
-      <p class="muted">One row per contact. The file is processed entirely in your browser — it is never uploaded or stored anywhere.</p>
+      <p class="muted">One row per contact. The file is processed in your browser and remembered on this device only — it is never sent to a server. Your contacts stay loaded next time you visit, so you only upload once.</p>
       <div class="upload-row">
         <input type="file" id="csvFile" accept=".csv,text/csv" />
         <span id="uploadSummary" class="muted"></span>
+        <button id="clearDataBtn" class="btn btn-ghost" hidden>Clear saved contacts</button>
       </div>
       <div id="mappingPanel" hidden>
         <h3>Check the column mapping</h3>

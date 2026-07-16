@@ -44,7 +44,19 @@ First visit, open **Settings** and paste in Ameresco's official value propositio
 
 - `mailto:` links (the Outlook handoff) are plain text and some systems truncate around ~1,800 characters — the app warns you and offers Copy instead. Short emails (the default) are always fine.
 - Responses stream from the serverless functions, which keeps within Netlify's function time limits even when the model thinks for a while.
-- Model can be changed with the `ANTHROPIC_MODEL` environment variable (default: `claude-opus-4-8`).
+- **Uploaded contacts and the "emailed" markers are remembered in your browser** (localStorage) — they survive refreshes and revisits, and never touch a server. Use "Clear saved contacts" to reset, or generate on a different device/browser and they won't carry over.
+- The **"emailed" badge** records the moment you clicked *Open in Outlook* for that person — it's a "prepared/sent" marker, not proof the mail actually left your outbox.
+
+### Models & cost
+
+To keep API spend down, the two AI calls use different models by default:
+
+| Task | Default model | Why |
+|---|---|---|
+| Company research | `claude-haiku-4-5` | Summarising a website is easy — the cheapest model is plenty. |
+| Email writing | `claude-sonnet-5` | The deliverable; a stronger writer, but far cheaper than Opus. |
+
+Override with environment variables: `ANTHROPIC_MODEL_RESEARCH`, `ANTHROPIC_MODEL_GENERATE`, or `ANTHROPIC_MODEL` (sets both). The value proposition is sent with prompt caching, so generating several emails in one sitting reuses it cheaply. As a rough guide, a research + email pair costs well under a US cent at these defaults.
 
 ## Project layout
 
