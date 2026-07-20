@@ -42,16 +42,32 @@
 
     <!-- Step 2 + 3: pick company & contact -->
     <section class="card" id="pickCard" hidden>
-      <h2><span class="step">2</span> Pick a company and a person</h2>
+      <div class="pick-header">
+        <h2><span class="step">2</span> Pick a company and a person</h2>
+        <button id="bulkToggle" class="btn btn-ghost">Bulk mode</button>
+      </div>
+      <p id="bulkHint" class="muted small" hidden>Tick people (across any companies), then generate drafts for all of them at once.</p>
+
+      <div id="dueBar" hidden></div>
+
       <div class="pick-columns">
         <div class="pick-col">
           <input type="search" id="companySearch" placeholder="Search companies…" />
           <ul id="companyList" class="select-list"></ul>
         </div>
         <div class="pick-col">
+          <div id="bulkColHead" hidden>
+            <button id="selectAllCompany" class="btn btn-ghost btn-small">Select all in this company</button>
+          </div>
           <div id="contactHint" class="muted center-note">Select a company to see its contacts</div>
           <ul id="contactList" class="select-list"></ul>
         </div>
+      </div>
+
+      <div id="bulkBar" class="bulk-bar" hidden>
+        <span id="bulkCount">0 selected</span>
+        <button id="bulkGenerateBtn" class="btn btn-primary">Generate drafts</button>
+        <button id="bulkClearBtn" class="btn btn-ghost btn-small">Clear selection</button>
       </div>
     </section>
 
@@ -59,6 +75,18 @@
     <section class="card" id="workCard" hidden>
       <h2><span class="step">3</span> Research &amp; draft</h2>
       <div id="targetBanner" class="target-banner"></div>
+      <div class="status-row">
+        <label>Status
+          <select id="statusSelect">
+            <option value="">— not set —</option>
+            <option value="emailed">Emailed / awaiting reply</option>
+            <option value="replied">Replied</option>
+            <option value="meeting">Meeting booked</option>
+            <option value="not_interested">Not interested</option>
+          </select>
+        </label>
+        <span class="muted small">Set the outcome so follow-up reminders know who still needs chasing.</span>
+      </div>
 
       <div class="work-grid">
         <div class="work-col">
@@ -154,6 +182,16 @@
       </div>
     </section>
   </main>
+
+  <!-- Bulk review modal -->
+  <dialog id="reviewModal">
+    <div class="review-head">
+      <h2>Bulk drafts</h2>
+      <button id="reviewClose" class="btn btn-ghost">Close</button>
+    </div>
+    <div id="reviewProgress" class="muted small"></div>
+    <div id="reviewList"></div>
+  </dialog>
 
   <!-- Settings modal -->
   <dialog id="settingsModal">

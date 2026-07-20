@@ -18,6 +18,8 @@ const state = {
   researchCache: {}, // company name -> research text
   passcodeRequired: false,
   defaultValueProp: "",
+  bulkMode: false,
+  bulkSelected: new Set(), // lowercased emails selected for bulk generation
 };
 
 const FIELDS = [
@@ -158,6 +160,85 @@ function formatSentDate(iso) {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
+// --- Outreach status (per contact) --------------------------------------
+const STATUS_LABELS = {
+  emailed: "awaiting reply",
+  replied: "replied",
+  meeting: "meeting",
+  not_interested: "not interested",
+};
+const FOLLOWUP_DUE_DAYS = 5; // business days after which a chase is "due"
+
+function getStatusStore() {
+  try {
+    return JSON.parse(localStorage.getItem("statusStore") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function getStatus(email) {
+  return getStatusStore()[email.toLowerCase()]?.status || "";
+}
+
+function setStatus(email, status) {
+  const s = getStatusStore();
+  const key = email.toLowerCase();
+  if (status) s[key] = { status, at: new Date().toISOString() };
+  else delete s[key];
+  localStorage.setItem("statusStore", JSON.stringify(s));
+}
+
+function businessDaysSince(iso) {
+  const cur = new Date(iso);
+  cur.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setHours(0, 0, 0, 0);
+  let days = 0;
+  while (cur < end) {
+    cur.setDate(cur.getDate() + 1);
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) days++;
+  }
+  return days;
+}
+
+function isDue(email) {
+  if (getStatus(email) !== "emailed") return false;
+  const iso = sentDateFor(email);
+  if (!iso) return false;
+  return businessDaysSince(iso) >= FOLLOWUP_DUE_DAYS;
+}
+
+// --- Per-contact saved draft (latest generated/edited email) ------------
+function getDraft(email) {
+  try {
+    return JSON.parse(localStorage.getItem("draftStore") || "{}")[email.toLowerCase()] || null;
+  } catch {
+    return null;
+  }
+}
+
+function setDraft(email, subject, body) {
+  let s = {};
+  try {
+    s = JSON.parse(localStorage.getItem("draftStore") || "{}");
+  } catch {
+    /* reset on corruption */
+  }
+  const key = email.toLowerCase();
+  if ((subject && subject.trim()) || (body && body.trim())) {
+    s[key] = { subject: subject || "", body: body || "", at: new Date().toISOString() };
+  } else {
+    delete s[key];
+  }
+  try {
+    localStorage.setItem("draftStore", JSON.stringify(s));
+  } catch {
+    /* quota */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Toast + fetch helpers
 // ---------------------------------------------------------------------------
@@ -276,6 +357,7 @@ function restoreSavedContacts() {
     (when ? ` (loaded ${when})` : "");
   $("clearDataBtn").hidden = false;
   renderCompanyList();
+  renderDueBar();
   $("pickCard").hidden = false;
 }
 
@@ -371,6 +453,7 @@ $("applyMapping").addEventListener("click", () => {
   saveContactData();
   $("clearDataBtn").hidden = false;
   renderCompanyList();
+  renderDueBar();
   $("pickCard").hidden = false;
   $("pickCard").scrollIntoView({ behavior: "smooth" });
 });
@@ -488,11 +571,25 @@ function selectCompany(company) {
 function renderContactList() {
   const company = state.selectedCompany;
   $("contactHint").hidden = Boolean(company);
+  $("bulkColHead").hidden = !(state.bulkMode && company);
   const list = $("contactList");
   list.innerHTML = "";
   if (!company) return;
   for (const contact of company.contacts) {
     const li = document.createElement("li");
+
+    if (state.bulkMode) {
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "bulk-check";
+      cb.checked = state.bulkSelected.has(contact.email.toLowerCase());
+      cb.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleBulk(contact.email, cb.checked);
+      });
+      li.appendChild(cb);
+    }
+
     const wrap = document.createElement("div");
     const nameEl = document.createElement("span");
     nameEl.textContent = contact.name;
@@ -503,20 +600,49 @@ function renderContactList() {
     wrap.appendChild(roleEl);
     li.appendChild(wrap);
 
-    const sentIso = sentDateFor(contact.email);
-    if (sentIso) {
-      li.classList.add("emailed");
-      const badge = document.createElement("span");
-      badge.className = "sent-badge";
-      badge.textContent = `✓ emailed ${formatSentDate(sentIso)}`;
-      badge.title = `Marked as emailed on ${new Date(sentIso).toLocaleString()}`;
-      li.appendChild(badge);
-    }
+    li.appendChild(contactBadge(contact.email));
 
     if (state.selectedContact === contact) li.classList.add("selected");
     li.addEventListener("click", () => selectContact(contact));
     list.appendChild(li);
   }
+}
+
+// Build the status/follow-up badge for a contact row (or null-ish empty span).
+function contactBadge(email) {
+  const status = getStatus(email);
+  const sentIso = sentDateFor(email);
+
+  if (isDue(email)) {
+    const b = document.createElement("span");
+    b.className = "due-badge";
+    b.textContent = `⏰ follow-up due`;
+    b.title = `Emailed ${sentIso ? new Date(sentIso).toLocaleDateString() : ""}, no reply logged`;
+    return b;
+  }
+  if (status) {
+    const b = document.createElement("span");
+    b.className = `status-badge ${status}`;
+    const label = STATUS_LABELS[status] || status;
+    b.textContent =
+      status === "emailed" && sentIso ? `✓ emailed ${formatSentDate(sentIso)}` : label;
+    return b;
+  }
+  if (sentIso) {
+    const b = document.createElement("span");
+    b.className = "status-badge emailed";
+    b.textContent = `✓ emailed ${formatSentDate(sentIso)}`;
+    return b;
+  }
+  const empty = document.createElement("span");
+  return empty;
+}
+
+function toggleBulk(email, on) {
+  const key = email.toLowerCase();
+  if (on) state.bulkSelected.add(key);
+  else state.bulkSelected.delete(key);
+  updateBulkBar();
 }
 
 function selectContact(contact) {
@@ -561,12 +687,15 @@ function selectContact(contact) {
   }
   $("researchBox").value = research || "";
   $("researchNote").textContent = researchNote;
-  $("subjectBox").value = "";
-  $("bodyBox").value = "";
+  // Restore a previously generated/edited draft for this person, if any.
+  const draft = getDraft(contact.email);
+  $("subjectBox").value = draft?.subject || "";
+  $("bodyBox").value = draft?.body || "";
   $("rationaleBox").hidden = true;
   $("lengthWarning").hidden = true;
   $("variationsPanel").hidden = true;
-  $("tweakRow").hidden = true;
+  $("tweakRow").hidden = !draft;
+  $("statusSelect").value = getStatus(contact.email);
   $("linkedinBtn").hidden = !contact.linkedin;
   $("linkedinNote").textContent = contact.linkedin
     ? "LinkedIn can't pre-fill a message — use Open LinkedIn, then paste with Copy message body."
@@ -575,8 +704,66 @@ function selectContact(contact) {
     ? "Your signature image is included via Copy formatted (paste into Outlook), not the mailto draft."
     : "";
   refreshFollowupAvailability();
+  updateLengthWarning();
   $("workCard").hidden = false;
   $("workCard").scrollIntoView({ behavior: "smooth" });
+}
+
+$("statusSelect").addEventListener("change", () => {
+  if (!state.selectedContact) return;
+  setStatus(state.selectedContact.email, $("statusSelect").value);
+  renderContactList();
+  renderDueBar();
+});
+
+// --- Follow-ups-due summary bar -----------------------------------------
+function renderDueBar() {
+  const bar = $("dueBar");
+  const due = [];
+  for (const co of state.companies) {
+    for (const c of co.contacts) {
+      if (isDue(c.email)) due.push({ company: co, contact: c, iso: sentDateFor(c.email) });
+    }
+  }
+  if (due.length === 0) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+  due.sort((a, b) => new Date(a.iso) - new Date(b.iso)); // oldest first
+  bar.hidden = false;
+  bar.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "due-wrap";
+  const head = document.createElement("span");
+  head.className = "due-head";
+  head.textContent = `⏰ ${due.length} follow-up${due.length > 1 ? "s" : ""} due (no reply after ${FOLLOWUP_DUE_DAYS} working days)`;
+  const toggle = document.createElement("button");
+  toggle.className = "btn btn-ghost btn-small";
+  toggle.textContent = "Show";
+  wrap.appendChild(head);
+  wrap.appendChild(toggle);
+  bar.appendChild(wrap);
+
+  const listEl = document.createElement("ul");
+  listEl.className = "due-list";
+  listEl.hidden = true;
+  for (const d of due) {
+    const li = document.createElement("li");
+    li.textContent = `${d.contact.name}${d.contact.title ? " — " + d.contact.title : ""} at ${d.company.name} · emailed ${formatSentDate(d.iso)}`;
+    li.addEventListener("click", () => {
+      if (state.bulkMode) toggleBulkMode();
+      selectCompany(d.company);
+      selectContact(d.contact);
+    });
+    listEl.appendChild(li);
+  }
+  bar.appendChild(listEl);
+  toggle.addEventListener("click", () => {
+    listEl.hidden = !listEl.hidden;
+    toggle.textContent = listEl.hidden ? "Show" : "Hide";
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -726,6 +913,9 @@ function showEmail(email) {
   }
   $("tweakRow").hidden = false;
   updateLengthWarning();
+  if (state.selectedContact) {
+    setDraft(state.selectedContact.email, email.subject || "", email.body || "");
+  }
 }
 
 async function runGenerate(button, busyText, task, extra) {
@@ -836,21 +1026,42 @@ function updateLengthWarning() {
   }
 }
 
-$("bodyBox").addEventListener("input", updateLengthWarning);
-$("subjectBox").addEventListener("input", updateLengthWarning);
+function saveCurrentDraft() {
+  if (state.selectedContact) {
+    setDraft(state.selectedContact.email, $("subjectBox").value, $("bodyBox").value);
+  }
+}
+$("bodyBox").addEventListener("input", () => { updateLengthWarning(); saveCurrentDraft(); });
+$("subjectBox").addEventListener("input", () => { updateLengthWarning(); saveCurrentDraft(); });
 
 // Record an outreach (any channel): flag the contact, save the email so
-// follow-ups can reference it, and refresh the UI.
+// follow-ups can reference it, set status to "emailed" (unless the user has
+// already logged a later outcome), and refresh the UI.
 function markContacted(contact, subject, body) {
   recordSent(contact.email);
   addEmailHistory(contact.email, subject, body);
+  const cur = getStatus(contact.email);
+  if (cur === "" || cur === "emailed") {
+    setStatus(contact.email, "emailed");
+    if (state.selectedContact === contact) $("statusSelect").value = "emailed";
+  }
   renderContactList();
   refreshFollowupAvailability();
+  renderDueBar();
 }
 
 function withTextSignature(body) {
   const sig = getSignatureText().trim();
   return sig ? `${body}\n\n${sig}` : body;
+}
+
+function openInOutlook(contact, subject, body) {
+  const href =
+    `mailto:${encodeURIComponent(contact.email)}` +
+    `?subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(withTextSignature(body))}`;
+  markContacted(contact, subject, body);
+  window.location.href = href;
 }
 
 $("outlookBtn").addEventListener("click", () => {
@@ -862,13 +1073,7 @@ $("outlookBtn").addEventListener("click", () => {
     toast("Generate or write an email first.", true);
     return;
   }
-  const href =
-    `mailto:${encodeURIComponent(contact.email)}` +
-    `?subject=${encodeURIComponent(subject)}` +
-    `&body=${encodeURIComponent(withTextSignature(body))}`;
-
-  markContacted(contact, subject, body);
-  window.location.href = href;
+  openInOutlook(contact, subject, body);
 });
 
 $("linkedinBtn").addEventListener("click", () => {
@@ -906,12 +1111,7 @@ function buildEmailHtml(body) {
   return `<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1d2530">${bodyHtml}${sigBlock}</div>`;
 }
 
-$("copyBtn").addEventListener("click", async () => {
-  const body = $("bodyBox").value;
-  if (!body.trim()) {
-    toast("Nothing to copy yet.", true);
-    return;
-  }
+async function copyFormatted(body) {
   const html = buildEmailHtml(body);
   const plain = withTextSignature(body);
   try {
@@ -935,6 +1135,15 @@ $("copyBtn").addEventListener("click", async () => {
     await navigator.clipboard.writeText(plain);
     toast("Email copied (plain text fallback).");
   }
+}
+
+$("copyBtn").addEventListener("click", () => {
+  const body = $("bodyBox").value;
+  if (!body.trim()) {
+    toast("Nothing to copy yet.", true);
+    return;
+  }
+  copyFormatted(body);
 });
 
 $("copyBodyBtn").addEventListener("click", async () => {
@@ -946,6 +1155,173 @@ $("copyBodyBtn").addEventListener("click", async () => {
   await navigator.clipboard.writeText(body);
   toast("Message body copied (no subject) — ready for LinkedIn.");
 });
+
+// ---------------------------------------------------------------------------
+// Bulk mode: select several people, generate drafts, review each
+// ---------------------------------------------------------------------------
+
+function toggleBulkMode() {
+  state.bulkMode = !state.bulkMode;
+  const btn = $("bulkToggle");
+  btn.textContent = state.bulkMode ? "Exit bulk mode" : "Bulk mode";
+  btn.classList.toggle("btn-primary", state.bulkMode);
+  btn.classList.toggle("btn-ghost", !state.bulkMode);
+  $("bulkHint").hidden = !state.bulkMode;
+  $("bulkBar").hidden = !state.bulkMode;
+  if (!state.bulkMode) state.bulkSelected.clear();
+  renderContactList();
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const n = state.bulkSelected.size;
+  $("bulkCount").textContent = `${n} selected`;
+  $("bulkGenerateBtn").disabled = n === 0;
+  $("bulkColHead").hidden = !(state.bulkMode && state.selectedCompany);
+}
+
+$("bulkToggle").addEventListener("click", toggleBulkMode);
+
+$("bulkClearBtn").addEventListener("click", () => {
+  state.bulkSelected.clear();
+  renderContactList();
+  updateBulkBar();
+});
+
+$("selectAllCompany").addEventListener("click", () => {
+  const co = state.selectedCompany;
+  if (!co) return;
+  for (const c of co.contacts) state.bulkSelected.add(c.email.toLowerCase());
+  renderContactList();
+  updateBulkBar();
+});
+
+// Resolve selected emails to {company, contact} pairs across all companies.
+function resolveBulkSelection() {
+  const out = [];
+  for (const co of state.companies) {
+    for (const c of co.contacts) {
+      if (state.bulkSelected.has(c.email.toLowerCase())) out.push({ company: co, contact: c });
+    }
+  }
+  return out;
+}
+
+$("bulkGenerateBtn").addEventListener("click", bulkGenerate);
+$("reviewClose").addEventListener("click", () => $("reviewModal").close());
+
+async function bulkGenerate() {
+  const selected = resolveBulkSelection();
+  if (selected.length === 0) return;
+  const valueProp = await getValueProp();
+  if (!valueProp.trim()) {
+    toast("Add the Ameresco value proposition in Settings first.", true);
+    return;
+  }
+
+  const options = {
+    tone: $("toneSelect").value,
+    length: $("lengthSelect").value,
+    callToAction: $("ctaSelect").value,
+    greeting: resolveGreeting(),
+  };
+  const sender = getSender();
+
+  $("reviewList").innerHTML = "";
+  $("reviewProgress").textContent = `Generating ${selected.length} draft${selected.length > 1 ? "s" : ""}… you can review each as it lands.`;
+  $("reviewModal").showModal();
+  setBusy($("bulkGenerateBtn"), true, "Working…");
+
+  let done = 0;
+  for (const { company, contact } of selected) {
+    const research =
+      getStoredResearch(company.name)?.text ||
+      state.researchCache[company.name] ||
+      "";
+    try {
+      const { text } = await streamRequest("/api/generate", {
+        task: "first",
+        company: { name: company.name, research, extraContext: "" },
+        contact,
+        options,
+        sender,
+        valueProp,
+      });
+      const email = JSON.parse(text);
+      setDraft(contact.email, email.subject, email.body);
+      addReviewItem(company, contact, email, null);
+    } catch (err) {
+      addReviewItem(company, contact, null, err.message);
+    }
+    done++;
+    $("reviewProgress").textContent = `Generated ${done} of ${selected.length}.`;
+  }
+  $("reviewProgress").textContent = `Done — ${done} draft${done > 1 ? "s" : ""}. Review, edit and send each below. Drafts are saved against each person.`;
+  setBusy($("bulkGenerateBtn"), false);
+  renderContactList();
+}
+
+function addReviewItem(company, contact, email, errorMsg) {
+  const item = document.createElement("div");
+  item.className = "review-item" + (errorMsg ? " errored" : "");
+
+  const who = document.createElement("div");
+  who.className = "r-who";
+  who.textContent = `${contact.name}${contact.title ? " — " + contact.title : ""} · ${company.name}`;
+  item.appendChild(who);
+
+  if (errorMsg) {
+    const err = document.createElement("div");
+    err.className = "muted small";
+    err.textContent = `Couldn't generate: ${errorMsg}`;
+    item.appendChild(err);
+    $("reviewList").appendChild(item);
+    return;
+  }
+
+  const subj = document.createElement("div");
+  subj.className = "r-subject";
+  subj.innerHTML = `<strong>Subject:</strong> `;
+  subj.appendChild(document.createTextNode(email.subject || ""));
+  item.appendChild(subj);
+
+  const bodyEl = document.createElement("div");
+  bodyEl.className = "r-body";
+  bodyEl.textContent = email.body || "";
+  item.appendChild(bodyEl);
+
+  const actions = document.createElement("div");
+  actions.className = "r-actions";
+
+  const outBtn = document.createElement("button");
+  outBtn.className = "btn btn-primary btn-small";
+  outBtn.textContent = "Open in Outlook";
+  outBtn.addEventListener("click", () => openInOutlook(contact, email.subject || "", email.body || ""));
+  actions.appendChild(outBtn);
+
+  const copyItemBtn = document.createElement("button");
+  copyItemBtn.className = "btn btn-secondary btn-small";
+  copyItemBtn.textContent = "Copy formatted";
+  copyItemBtn.addEventListener("click", async () => {
+    await copyFormatted(email.body || "");
+    markContacted(contact, email.subject || "", email.body || "");
+  });
+  actions.appendChild(copyItemBtn);
+
+  const editBtn = document.createElement("button");
+  editBtn.className = "btn btn-ghost btn-small";
+  editBtn.textContent = "Edit";
+  editBtn.addEventListener("click", () => {
+    $("reviewModal").close();
+    if (state.bulkMode) toggleBulkMode();
+    selectCompany(company);
+    selectContact(contact);
+  });
+  actions.appendChild(editBtn);
+
+  item.appendChild(actions);
+  $("reviewList").appendChild(item);
+}
 
 // ---------------------------------------------------------------------------
 // Settings (stored in this browser only)

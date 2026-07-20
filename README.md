@@ -33,6 +33,14 @@ Put your API key in a `.env` file first (copy `.env.example`). The local server 
 
 First visit, open **Settings** and paste in Ameresco's official value proposition (a starter draft is bundled) and your name/title for the sign-off.
 
+## Working a list: status tracking & bulk
+
+Both of these sit alongside the normal one-at-a-time flow — nothing is taken away.
+
+- **Status per person** — set an outcome (Emailed / Replied / Meeting booked / Not interested) in the draft area. A colour-coded badge shows in the contact list.
+- **Follow-ups due** — anyone still "Emailed" after 5 working days with no reply logged is flagged, and a "⏰ N follow-ups due" bar at the top of the picker lists them (click one to jump straight to it). Set their status to Replied/Meeting/Not interested to clear them.
+- **Bulk mode** — tick people across any companies, then **Generate drafts** produces an email for each in one go (using saved research, so no extra web-search cost). A review panel lets you open each in Outlook, copy it, or jump into the full editor to tweak. Every generated/edited draft is saved against the person, so it's still there next time you select them.
+
 ## Privacy notes
 
 - The CSV is parsed entirely in the browser and never uploaded or saved anywhere.
