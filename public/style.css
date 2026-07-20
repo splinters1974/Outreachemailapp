@@ -238,6 +238,9 @@ dialog::backdrop { background: rgba(20, 30, 40, 0.45); }
 .settings-form { padding: 24px 28px; }
 .settings-form h2 { margin-top: 0; }
 .vp-load-row { display: flex; align-items: center; gap: 12px; margin: 4px 0 8px; }
+.sig-image-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+.sig-preview { margin: 4px 0 8px; }
+.sig-preview img { max-width: 320px; max-height: 120px; border: 1px solid var(--line); border-radius: 6px; padding: 4px; background: #fff; }
 .file-btn { display: inline-block; cursor: pointer; }
 .sender-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .sender-grid label { font-size: 12.5px; font-weight: 600; display: grid; gap: 4px; }

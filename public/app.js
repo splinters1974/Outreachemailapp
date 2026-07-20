@@ -83,6 +83,24 @@ function getPasscode() {
   return localStorage.getItem("passcode") || "";
 }
 
+function getSignatureText() {
+  return localStorage.getItem("signatureText") || "";
+}
+
+function getSignatureImage() {
+  return localStorage.getItem("signatureImage") || ""; // data: URI or ""
+}
+
+// Resolve the greeting selector to a concrete phrase for the model.
+function resolveGreeting() {
+  const choice = $("greetingSelect") ? $("greetingSelect").value : "timeofday";
+  if (choice !== "timeofday") return choice; // "Hi" | "Hello" | "Dear"
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 // Persisted uploaded contacts (so you don't re-upload/re-map each visit).
 function saveContactData() {
   try {
@@ -541,6 +559,9 @@ function selectContact(contact) {
   $("linkedinNote").textContent = contact.linkedin
     ? "LinkedIn can't pre-fill a message — use Open LinkedIn, then paste with Copy message body."
     : "";
+  $("signatureNote").textContent = getSignatureImage()
+    ? "Your signature image is included via Copy formatted (paste into Outlook), not the mailto draft."
+    : "";
   refreshFollowupAvailability();
   $("workCard").hidden = false;
   $("workCard").scrollIntoView({ behavior: "smooth" });
@@ -636,6 +657,7 @@ async function generatePayload(task, extra = {}) {
       tone: $("toneSelect").value,
       length: $("lengthSelect").value,
       callToAction: $("ctaSelect").value,
+      greeting: resolveGreeting(),
     },
     sender: getSender(),
     valueProp: await getValueProp(),
@@ -777,6 +799,11 @@ function markContacted(contact, subject, body) {
   refreshFollowupAvailability();
 }
 
+function withTextSignature(body) {
+  const sig = getSignatureText().trim();
+  return sig ? `${body}\n\n${sig}` : body;
+}
+
 $("outlookBtn").addEventListener("click", () => {
   const contact = state.selectedContact;
   if (!contact) return;
@@ -789,7 +816,7 @@ $("outlookBtn").addEventListener("click", () => {
   const href =
     `mailto:${encodeURIComponent(contact.email)}` +
     `?subject=${encodeURIComponent(subject)}` +
-    `&body=${encodeURIComponent(body)}`;
+    `&body=${encodeURIComponent(withTextSignature(body))}`;
 
   markContacted(contact, subject, body);
   window.location.href = href;
@@ -810,15 +837,55 @@ $("linkedinBtn").addEventListener("click", () => {
   window.open(contact.linkedin, "_blank", "noopener,noreferrer");
 });
 
+function escapeHtml(s) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Build an HTML version of the email + signature (image included) for pasting.
+function buildEmailHtml(body) {
+  const bodyHtml = escapeHtml(body).replace(/\n/g, "<br>");
+  const sigText = getSignatureText().trim();
+  const sigImg = getSignatureImage();
+  let sig = "";
+  if (sigText) sig += `<div>${escapeHtml(sigText).replace(/\n/g, "<br>")}</div>`;
+  if (sigImg) sig += `<div style="margin-top:8px"><img src="${sigImg}" alt="signature" style="max-width:400px"></div>`;
+  const sigBlock = sig ? `<br>${sig}` : "";
+  return `<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1d2530">${bodyHtml}${sigBlock}</div>`;
+}
+
 $("copyBtn").addEventListener("click", async () => {
-  const subject = $("subjectBox").value.trim();
   const body = $("bodyBox").value;
   if (!body.trim()) {
     toast("Nothing to copy yet.", true);
     return;
   }
-  await navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`);
-  toast("Email copied to clipboard.");
+  const html = buildEmailHtml(body);
+  const plain = withTextSignature(body);
+  try {
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plain], { type: "text/plain" }),
+        }),
+      ]);
+      toast(
+        getSignatureImage()
+          ? "Formatted email copied — paste into Outlook (image included)."
+          : "Formatted email copied — paste into Outlook."
+      );
+    } else {
+      await navigator.clipboard.writeText(plain);
+      toast("Email copied (plain text — this browser can't copy formatting).");
+    }
+  } catch {
+    await navigator.clipboard.writeText(plain);
+    toast("Email copied (plain text fallback).");
+  }
 });
 
 $("copyBodyBtn").addEventListener("click", async () => {
@@ -835,15 +902,66 @@ $("copyBodyBtn").addEventListener("click", async () => {
 // Settings (stored in this browser only)
 // ---------------------------------------------------------------------------
 
+// Pending signature image chosen in the modal but not yet saved.
+let pendingSignatureImage = null; // null = unchanged, "" = removed, data: = new
+
+function renderSignatureImagePreview(dataUri) {
+  const preview = $("signatureImagePreview");
+  preview.innerHTML = "";
+  if (dataUri) {
+    const img = document.createElement("img");
+    img.src = dataUri;
+    img.alt = "signature";
+    preview.appendChild(img);
+    preview.hidden = false;
+    $("removeSignatureImage").hidden = false;
+  } else {
+    preview.hidden = true;
+    $("removeSignatureImage").hidden = true;
+  }
+}
+
 $("settingsBtn").addEventListener("click", async () => {
   $("valuePropBox").value = await getValueProp();
   const sender = getSender();
   $("senderName").value = sender.name || "";
   $("senderTitle").value = sender.title || "";
   $("senderPhone").value = sender.phone || "";
+  $("signatureText").value = getSignatureText();
+  pendingSignatureImage = null;
+  $("signatureImageStatus").textContent = "";
+  renderSignatureImagePreview(getSignatureImage());
   $("passcodeInput").value = getPasscode();
   $("passcodeField").hidden = !state.passcodeRequired;
   $("settingsModal").showModal();
+});
+
+$("signatureImageInput").addEventListener("change", (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 1024 * 1024) {
+    $("signatureImageStatus").textContent =
+      "Image is over 1 MB — please use a smaller one (signatures should be small).";
+    event.target.value = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    pendingSignatureImage = reader.result;
+    renderSignatureImagePreview(pendingSignatureImage);
+    $("signatureImageStatus").textContent = "Loaded — Save to keep it.";
+  };
+  reader.onerror = () => {
+    $("signatureImageStatus").textContent = "Couldn't read that image.";
+  };
+  reader.readAsDataURL(file);
+  event.target.value = "";
+});
+
+$("removeSignatureImage").addEventListener("click", () => {
+  pendingSignatureImage = "";
+  renderSignatureImagePreview("");
+  $("signatureImageStatus").textContent = "Image will be removed on Save.";
 });
 
 $("saveSettings").addEventListener("click", () => {
@@ -856,6 +974,18 @@ $("saveSettings").addEventListener("click", () => {
       phone: $("senderPhone").value.trim(),
     })
   );
+  localStorage.setItem("signatureText", $("signatureText").value);
+  if (pendingSignatureImage !== null) {
+    if (pendingSignatureImage) {
+      try {
+        localStorage.setItem("signatureImage", pendingSignatureImage);
+      } catch {
+        toast("Couldn't save the signature image — it may be too large.", true);
+      }
+    } else {
+      localStorage.removeItem("signatureImage");
+    }
+  }
   const passcode = $("passcodeInput").value.trim();
   if (passcode) localStorage.setItem("passcode", passcode);
   toast("Settings saved (stored in this browser).");

@@ -149,12 +149,17 @@ export default async (req) => {
   const tone = options?.tone || "professional and warm";
   const length = options?.length || "short (around 90 words)";
   const cta = options?.callToAction || "a brief 15-20 minute intro call";
+  // The client passes a resolved greeting phrase (e.g. "Good morning", "Hi",
+  // "Dear"); blank lets the model choose.
+  const greeting = (options?.greeting || "").trim();
+  const firstName = (contact.name || "").trim().split(/\s+/)[0] || "";
+  const greetingLine = greeting
+    ? `GREETING: Begin the email with exactly "${greeting}" followed by the recipient's first name, e.g. "${greeting} ${firstName || "Alex"},". Do not use any other greeting.\n`
+    : "";
 
   const senderBlock = sender?.name
     ? `Sender: ${sender.name}${sender.title ? ", " + sender.title : ""}, Ameresco.${sender.phone ? " Phone: " + sender.phone : ""}`
     : "Sender: an Ameresco business development professional.";
-
-  const firstName = (contact.name || "").trim().split(/\s+/)[0] || "";
 
   const targetBlock =
     `RECIPIENT: ${contact.name || "Unknown name"}` +
@@ -187,7 +192,8 @@ export default async (req) => {
       priorEmailsBlock(body.history) +
       targetBlock +
       `${senderBlock}\n` +
-      `Tone: ${tone}. Call to action: ${cta}.`;
+      `Tone: ${tone}. Call to action: ${cta}.\n` +
+      greetingLine;
   } else if (task === "variations") {
     schema = VARIATIONS_SCHEMA;
     userContent =
@@ -195,6 +201,7 @@ export default async (req) => {
       targetBlock +
       `${senderBlock}\n` +
       `Tone: ${tone}. Length: ${length}. Call to action: ${cta}.\n` +
+      greetingLine +
       `Return exactly three options in "variants".`;
   } else {
     // first touch
@@ -203,7 +210,8 @@ export default async (req) => {
       `Write one cold outreach email.\n\n` +
       targetBlock +
       `${senderBlock}\n` +
-      `Tone: ${tone}. Length: ${length}. Call to action: ${cta}.`;
+      `Tone: ${tone}. Length: ${length}. Call to action: ${cta}.\n` +
+      greetingLine;
   }
 
   const stream = client.messages.stream({

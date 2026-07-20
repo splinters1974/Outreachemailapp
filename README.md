@@ -46,6 +46,8 @@ First visit, open **Settings** and paste in Ameresco's official value propositio
 - Responses stream from the serverless functions, which keeps within Netlify's function time limits even when the model thinks for a while.
 - **Uploaded contacts and the "emailed" markers are remembered in your browser** (localStorage) — they survive refreshes and revisits, and never touch a server. Use "Clear saved contacts" to reset, or generate on a different device/browser and they won't carry over.
 - The **"emailed" badge** records the moment you clicked *Open in Outlook* for that person — it's a "prepared/sent" marker, not proof the mail actually left your outbox.
+- **Greeting** — pick *Good morning/afternoon* (chosen from your local clock at generation time), *Hi*, *Hello*, or *Dear*.
+- **Signature** — add it in Settings (text plus an optional image). The text goes into the *Open in Outlook* draft; the **image** can't travel through a `mailto:` link, so use **Copy formatted (with signature)** and paste into Outlook/Gmail to include it. The signature is applied locally at export and is never sent to the AI.
 
 ### Models & cost
 
