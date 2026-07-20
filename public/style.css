@@ -175,6 +175,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid #9fceb0; border-c
   font-size: 13.5px;
   margin: 8px 0 16px;
 }
+.li-link { color: var(--green-dark); font-weight: 600; text-decoration: underline; white-space: nowrap; }
+.li-link:hover { color: var(--green); }
+
 .work-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
 .work-col { display: grid; gap: 8px; align-content: start; }
 .work-col label { font-size: 13px; font-weight: 600; margin-top: 6px; }

@@ -28,7 +28,24 @@ const FIELDS = [
   { key: "jobTitle", label: "Job title / role", partial: ["job title", "jobtitle", "position"], exact: ["title", "role", "job"] },
   { key: "company", label: "Company", partial: ["company", "organisation", "organization", "employer"], exact: ["account", "business"] },
   { key: "website", label: "Website / domain", partial: ["website", "domain"], exact: ["url", "web", "site"] },
+  { key: "linkedin", label: "LinkedIn URL (optional)", partial: ["linkedin", "linked in"], exact: ["profile"] },
 ];
+
+// Normalise a LinkedIn value to a safe https URL, or "" if it isn't one.
+function normalizeLinkedIn(value) {
+  const v = String(value || "").trim().replace(/^@/, "");
+  if (!v || !/linkedin\.com/i.test(v)) return "";
+  const withProto = /^https?:\/\//i.test(v) ? v : "https://" + v;
+  try {
+    const url = new URL(withProto);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    if (!/(^|\.)linkedin\.com$/i.test(url.hostname)) return "";
+    url.protocol = "https:";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
 
 const FREE_EMAIL_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "hotmail.com", "hotmail.co.uk", "outlook.com",
@@ -377,6 +394,7 @@ function buildCompanies() {
       name: name || email,
       title: m.jobTitle ? String(row[m.jobTitle] || "").trim() : "",
       email,
+      linkedin: m.linkedin ? normalizeLinkedIn(row[m.linkedin]) : "",
     });
     if (website) company.websites.push(website);
     if (!FREE_EMAIL_DOMAINS.has(emailDomain)) company.emailDomains.push(emailDomain);
@@ -499,6 +517,17 @@ function selectContact(contact) {
         (company.domain ? ` (${company.domain})` : "")
     )
   );
+  if (contact.linkedin) {
+    banner.appendChild(document.createTextNode("  "));
+    const li = document.createElement("a");
+    li.href = contact.linkedin;
+    li.target = "_blank";
+    li.rel = "noopener noreferrer";
+    li.className = "li-link";
+    li.textContent = "Check on LinkedIn ↗";
+    li.title = "Open their LinkedIn profile to confirm they're still in this role";
+    banner.appendChild(li);
+  }
 
   $("researchBox").value = state.researchCache[company.name] || "";
   $("researchNote").textContent = "";
@@ -508,6 +537,10 @@ function selectContact(contact) {
   $("lengthWarning").hidden = true;
   $("variationsPanel").hidden = true;
   $("tweakRow").hidden = true;
+  $("linkedinBtn").hidden = !contact.linkedin;
+  $("linkedinNote").textContent = contact.linkedin
+    ? "LinkedIn can't pre-fill a message — use Open LinkedIn, then paste with Copy message body."
+    : "";
   refreshFollowupAvailability();
   $("workCard").hidden = false;
   $("workCard").scrollIntoView({ behavior: "smooth" });
@@ -735,6 +768,15 @@ function updateLengthWarning() {
 $("bodyBox").addEventListener("input", updateLengthWarning);
 $("subjectBox").addEventListener("input", updateLengthWarning);
 
+// Record an outreach (any channel): flag the contact, save the email so
+// follow-ups can reference it, and refresh the UI.
+function markContacted(contact, subject, body) {
+  recordSent(contact.email);
+  addEmailHistory(contact.email, subject, body);
+  renderContactList();
+  refreshFollowupAvailability();
+}
+
 $("outlookBtn").addEventListener("click", () => {
   const contact = state.selectedContact;
   if (!contact) return;
@@ -749,14 +791,23 @@ $("outlookBtn").addEventListener("click", () => {
     `?subject=${encodeURIComponent(subject)}` +
     `&body=${encodeURIComponent(body)}`;
 
-  // Mark this person as emailed (records the moment you opened the draft),
-  // store the email so follow-ups can reference it, and refresh the UI.
-  recordSent(contact.email);
-  addEmailHistory(contact.email, subject, body);
-  renderContactList();
-  refreshFollowupAvailability();
-
+  markContacted(contact, subject, body);
   window.location.href = href;
+});
+
+$("linkedinBtn").addEventListener("click", () => {
+  const contact = state.selectedContact;
+  if (!contact?.linkedin) return;
+  const body = $("bodyBox").value;
+  // Copy the body so it's ready to paste into the LinkedIn message box.
+  if (body.trim() && navigator.clipboard) {
+    navigator.clipboard.writeText(body).then(
+      () => toast("Message body copied — paste it into LinkedIn."),
+      () => {}
+    );
+    markContacted(contact, $("subjectBox").value.trim(), body);
+  }
+  window.open(contact.linkedin, "_blank", "noopener,noreferrer");
 });
 
 $("copyBtn").addEventListener("click", async () => {
@@ -768,6 +819,16 @@ $("copyBtn").addEventListener("click", async () => {
   }
   await navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`);
   toast("Email copied to clipboard.");
+});
+
+$("copyBodyBtn").addEventListener("click", async () => {
+  const body = $("bodyBox").value;
+  if (!body.trim()) {
+    toast("Nothing to copy yet.", true);
+    return;
+  }
+  await navigator.clipboard.writeText(body);
+  toast("Message body copied (no subject) — ready for LinkedIn.");
 });
 
 // ---------------------------------------------------------------------------
