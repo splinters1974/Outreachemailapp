@@ -67,7 +67,7 @@ const EMAIL_ITEM = {
     body: {
       type: "string",
       description:
-        "The email body as plain text, 60-120 words, including greeting and sign-off, with normal line breaks between short paragraphs.",
+        "The email body as plain text at the requested length, including greeting and sign-off, with normal line breaks between short paragraphs.",
     },
     rationale: {
       type: "string",
@@ -96,8 +96,8 @@ const VARIATIONS_SCHEMA = {
 const BEST_PRACTICE = `You write first-touch cold outreach emails for Ameresco — an energy efficiency, renewable energy and energy infrastructure company — to senior people in large organisations.
 
 HOW A GOOD SENIOR-LEVEL COLD EMAIL IS BUILT (follow this):
-- Length: 60-120 words in the body. Shorter is better; a busy senior reader skims on a phone. Never exceed 120 words.
-- Structure, three short movements, one to two sentences each:
+- Length: write to the requested length given below, and get reasonably close to that word count. Whatever the length, every sentence must earn its place — no filler, no repetition, no restating the same benefit. A busy senior reader skims on a phone, so front-load the point. For longer emails, add depth (a second proof point, a little more company-specific context) rather than padding.
+- Structure, three movements — expand each in proportion to the requested length:
     1) WHY I'M WRITING — open with something specific and true about THEM: their company, their sector's pressures, a recent development, or their role. Never open with Ameresco or "I hope this finds you well".
     2) WHAT I PROPOSE — the value in a single sentence tied to their driver. Not a feature list.
     3) PROOF — one credible proof point supported by the value proposition. If none fits, use a modest credibility line rather than inventing a statistic.
@@ -147,7 +147,7 @@ export default async (req) => {
   if (!client) return json(400, { error: NO_KEY_MESSAGE });
 
   const tone = options?.tone || "professional and warm";
-  const length = options?.length || "short (around 90 words)";
+  const length = options?.length || "medium (about 160 words)";
   const cta = options?.callToAction || "a brief 15-20 minute intro call";
   // The client passes a resolved greeting phrase (e.g. "Good morning", "Hi",
   // "Dear"); blank lets the model choose.
