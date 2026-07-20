@@ -58,7 +58,15 @@ To keep API spend down, the two AI calls use different models by default:
 | Company research | `claude-haiku-4-5` | Summarising a website is easy — the cheapest model is plenty. |
 | Email writing | `claude-sonnet-5` | The deliverable; a stronger writer, but far cheaper than Opus. |
 
-Override with environment variables: `ANTHROPIC_MODEL_RESEARCH`, `ANTHROPIC_MODEL_GENERATE`, or `ANTHROPIC_MODEL` (sets both). The value proposition is sent with prompt caching, so generating several emails in one sitting reuses it cheaply. As a rough guide, a research + email pair costs well under a US cent at these defaults.
+Override with environment variables: `ANTHROPIC_MODEL_RESEARCH`, `ANTHROPIC_MODEL_GENERATE`, or `ANTHROPIC_MODEL` (sets both). The value proposition is sent with prompt caching, so generating several emails in one sitting reuses it cheaply.
+
+**The main cost is live web search** in the research step (billed per query, ~1¢ each), not the model tokens. To keep it down:
+
+- **"Include live web research" toggle** (on by default) — untick it for companies you already know well and research runs on the model's own knowledge for free.
+- **Research is saved per company** in your browser — you only pay to research each company once, ever. Re-selecting it (even after a reload) loads the saved briefing with no API call; click "Research company" again to refresh.
+- Web search is capped at 2 queries per research, and can be switched off entirely with the `DISABLE_WEB_SEARCH` environment variable.
+
+At these defaults, an email with fresh web research is roughly 2–4¢ (mostly the searches); an email reusing saved research or with web search off is well under a cent.
 
 ## Project layout
 

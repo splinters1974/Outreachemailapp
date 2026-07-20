@@ -69,8 +69,13 @@ export default async (req) => {
   const denied = requireAuth(req);
   if (denied) return denied;
 
-  const { companyName, domain } = await req.json().catch(() => ({}));
+  const reqBody = await req.json().catch(() => ({}));
+  const { companyName, domain } = reqBody;
   if (!companyName) return json(400, { error: "companyName is required." });
+  // Live web search is opt-in per request (it is the main cost driver) and can
+  // be disabled globally via env var. Default on when the client doesn't say.
+  const useWeb =
+    !process.env.DISABLE_WEB_SEARCH && reqBody.webSearch !== false;
 
   const client = getClient();
   if (!client) return json(400, { error: NO_KEY_MESSAGE });
@@ -88,19 +93,28 @@ export default async (req) => {
     }
   }
 
-  // Allow disabling live web search (and its per-search cost) via env var.
-  const webSearch = process.env.DISABLE_WEB_SEARCH ? [] : [
-    { type: "web_search_20250305", name: "web_search", max_uses: 3 },
-  ];
+  // Web search (max 2 uses) is only attached when opted in — it is billed per
+  // query and is the dominant cost.
+  const tools = useWeb
+    ? [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }]
+    : [];
+
+  const searchSystem = useWeb
+    ? "You have a web search tool: use it (once or twice) to find CURRENT, specific facts — recent news, expansions, results, net zero / sustainability commitments, leadership changes, or regulatory pressure — that a salesperson could open an email with. "
+    : "";
+
+  const searchInstruction = useWeb
+    ? "First, run one or two web searches for recent, specific developments about this company (news, sustainability or net zero commitments, expansions, financial results, regulatory pressure). Then combine "
+    : "Combine ";
 
   const stream = client.messages.stream({
     model: MODEL_RESEARCH,
     max_tokens: 1500,
-    tools: webSearch,
+    tools,
     system:
       "You are a B2B sales researcher preparing a briefing for an Ameresco business development professional. " +
       "Ameresco is an energy efficiency, renewable energy, and energy infrastructure company. " +
-      "You have a web search tool: use it to find CURRENT, specific facts — recent news, expansions, results, net zero / sustainability commitments, leadership changes, or regulatory pressure — that a salesperson could open an email with. " +
+      searchSystem +
       "Prefer recent, verifiable facts over generic description. Write concise, factual briefings and never invent details; if something is unverified, say so.",
     messages: [
       {
@@ -109,8 +123,10 @@ export default async (req) => {
           `Prepare a short sales briefing on the company "${companyName}"` +
           (domain ? ` (website: ${domain})` : "") +
           `.\n\nWebsite content retrieved just now:\n${websiteSection}\n\n` +
-          "First, run one or two web searches for recent, specific developments about this company (news, sustainability or net zero commitments, expansions, financial results, regulatory pressure). " +
-          "Then combine the website content, your search findings, and what you reliably know, into a briefing with these short labelled sections:\n" +
+          searchInstruction +
+          "the website content" +
+          (useWeb ? ", your search findings," : "") +
+          " and what you reliably know, into a briefing with these short labelled sections:\n" +
           "1. What they do — sector, offering, scale (sites/locations if evident).\n" +
           "2. Energy & sustainability angle — energy-intensive operations, ageing estate, net zero / ESG commitments, or regulatory pressure.\n" +
           "3. Recent developments — anything current and specific worth referencing in an opening line (with rough dates where known).\n" +
