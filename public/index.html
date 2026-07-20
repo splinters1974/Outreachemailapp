@@ -73,6 +73,14 @@
           <textarea id="extraContext" rows="2"></textarea>
 
           <div class="options-row">
+            <label>Greeting
+              <select id="greetingSelect">
+                <option value="timeofday">Good morning/afternoon</option>
+                <option value="Hi">Hi</option>
+                <option value="Hello">Hello</option>
+                <option value="Dear">Dear</option>
+              </select>
+            </label>
             <label>Tone
               <select id="toneSelect">
                 <option value="professional and warm">Professional &amp; warm</option>
@@ -131,8 +139,12 @@
 
           <div class="send-row">
             <button id="outlookBtn" class="btn btn-primary btn-large">Open in Outlook</button>
-            <button id="copyBtn" class="btn btn-secondary">Copy email</button>
+            <button id="linkedinBtn" class="btn btn-secondary" hidden>Open LinkedIn</button>
+            <button id="copyBtn" class="btn btn-secondary">Copy formatted (with signature)</button>
+            <button id="copyBodyBtn" class="btn btn-secondary">Copy message body</button>
           </div>
+          <div class="muted small" id="linkedinNote"></div>
+          <div class="muted small" id="signatureNote"></div>
         </div>
       </div>
     </section>
@@ -160,6 +172,19 @@
         <label>Job title <input type="text" id="senderTitle" placeholder="e.g. Business Development Manager" /></label>
         <label>Phone <input type="text" id="senderPhone" placeholder="optional" /></label>
       </div>
+
+      <h3>Email signature</h3>
+      <p class="muted small">Added when you export. The text goes into the Outlook draft; the image is included when you use <strong>Copy formatted</strong> and paste into Outlook (a <code>mailto:</code> draft can't carry images).</p>
+      <textarea id="signatureText" rows="4" placeholder="e.g.&#10;Martyn Sheridan&#10;Business Development Manager | Ameresco&#10;+44 7700 900000 | ameresco.com"></textarea>
+      <div class="sig-image-row">
+        <label class="btn btn-secondary file-btn">
+          Upload signature image
+          <input type="file" id="signatureImageInput" accept="image/png,image/jpeg,image/gif" hidden />
+        </label>
+        <button type="button" id="removeSignatureImage" class="btn btn-ghost" hidden>Remove image</button>
+        <span id="signatureImageStatus" class="muted small"></span>
+      </div>
+      <div id="signatureImagePreview" class="sig-preview" hidden></div>
 
       <div id="passcodeField">
         <h3>Site passcode</h3>
