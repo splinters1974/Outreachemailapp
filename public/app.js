@@ -547,8 +547,20 @@ function selectContact(contact) {
     banner.appendChild(li);
   }
 
-  $("researchBox").value = state.researchCache[company.name] || "";
-  $("researchNote").textContent = "";
+  // Prefer in-session cache, then persisted research (avoids re-paying the API
+  // to research a company you've already looked at, even across visits).
+  let research = state.researchCache[company.name];
+  let researchNote = "";
+  if (!research) {
+    const stored = getStoredResearch(company.name);
+    if (stored) {
+      research = stored.text;
+      state.researchCache[company.name] = stored.text;
+      researchNote = `Saved research loaded (${new Date(stored.at).toLocaleDateString()}) — no new API cost. Click "Research company" to refresh.`;
+    }
+  }
+  $("researchBox").value = research || "";
+  $("researchNote").textContent = researchNote;
   $("subjectBox").value = "";
   $("bodyBox").value = "";
   $("rationaleBox").hidden = true;
@@ -611,21 +623,56 @@ function refreshFollowupAvailability() {
 // Step 3 — research & generate
 // ---------------------------------------------------------------------------
 
+// Persisted research per company (so you never re-pay to research one twice).
+function getStoredResearch(companyName) {
+  try {
+    const all = JSON.parse(localStorage.getItem("researchStore") || "{}");
+    return all[companyName.toLowerCase()] || null;
+  } catch {
+    return null;
+  }
+}
+
+function setStoredResearch(companyName, text) {
+  let all = {};
+  try {
+    all = JSON.parse(localStorage.getItem("researchStore") || "{}");
+  } catch {
+    /* reset on corruption */
+  }
+  if (text && text.trim()) {
+    all[companyName.toLowerCase()] = { text, at: new Date().toISOString() };
+  } else {
+    delete all[companyName.toLowerCase()];
+  }
+  try {
+    localStorage.setItem("researchStore", JSON.stringify(all));
+  } catch {
+    /* quota — non-fatal */
+  }
+}
+
 $("researchBtn").addEventListener("click", async () => {
   const company = state.selectedCompany;
   if (!company) return;
   setBusy($("researchBtn"), true, "Researching…");
   $("researchBox").value = "";
+  $("researchNote").textContent = "";
   try {
     const { text, response } = await streamRequest(
       "/api/research",
-      { companyName: company.name, domain: company.domain },
+      {
+        companyName: company.name,
+        domain: company.domain,
+        webSearch: $("webSearchToggle").checked,
+      },
       (partial) => {
         $("researchBox").value = partial;
       }
     );
     $("researchBox").value = text;
     state.researchCache[company.name] = text;
+    setStoredResearch(company.name, text);
     const note = response.headers.get("X-Fetch-Note");
     $("researchNote").textContent = note ? decodeURIComponent(note) : "";
   } catch (err) {
@@ -637,7 +684,9 @@ $("researchBtn").addEventListener("click", async () => {
 
 $("researchBox").addEventListener("input", () => {
   if (state.selectedCompany) {
-    state.researchCache[state.selectedCompany.name] = $("researchBox").value;
+    const text = $("researchBox").value;
+    state.researchCache[state.selectedCompany.name] = text;
+    setStoredResearch(state.selectedCompany.name, text);
   }
 });
 
